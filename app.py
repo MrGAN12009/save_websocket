@@ -8,6 +8,7 @@ from PyQt5.QtCore import Qt, QTimer
 
 API_BASE_URL = "http://127.0.0.1:8080"
 
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
