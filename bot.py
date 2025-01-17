@@ -7,9 +7,9 @@ from telebot import TeleBot
 import websockets
 
 # Укажите ваш токен Telegram-бота
-API_TOKEN = ""
+API_TOKEN = "7430419581:AAFV5bZJrV04IjBnx7Gl3dcezE9Xn0xBbOA"
+ACCESS_TOKEN = "my_secure_token"
 
-# Инициализация бота
 bot = TeleBot(API_TOKEN)
 
 # Подключение к базе данных
@@ -53,14 +53,32 @@ def get_chat_messages(chat_id):
         } for row in rows
     ]
 
+def validate_token(headers):
+    token = headers.get("Authorization")
+    return token == ACCESS_TOKEN
+
 class RequestHandler(BaseHTTPRequestHandler):
     def _send_response(self, status_code, data):
         self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode('utf-8'))
 
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.end_headers()
+
     def do_GET(self):
+        if not validate_token(self.headers):
+            self._send_response(403, {"error": "Forbidden: Invalid or missing token"})
+            return
+
         if self.path.startswith("/users"):
             self._send_response(200, list(users.values()))
         elif self.path.startswith("/messages"):
@@ -79,6 +97,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_response(404, {"error": "Not found"})
 
     def do_POST(self):
+        if not validate_token(self.headers):
+            self._send_response(403, {"error": "Forbidden: Invalid or missing token"})
+            return
+
         if self.path == "/send_message":
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -91,8 +113,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     raise ValueError("Missing user_id or message")
 
                 bot.send_message(user_id, message)
-                self._send_response(200, {"status": "Message sent successfully"})
                 save_command(user_id, 'bot', 'bot', 'bot', message)
+                self._send_response(200, {"status": "Message sent successfully"})
             except Exception as e:
                 self._send_response(400, {"error": str(e)})
         else:
@@ -129,12 +151,11 @@ def start_websocket_server():
 async def _start_websocket_server():
     async with websockets.serve(websocket_handler, "0.0.0.0", 8765):
         print("WebSocket-сервер запущен на порту 8765")
-        await asyncio.Future()  # Блокировка для работы сервера
+        await asyncio.Future()
 
 if __name__ == "__main__":
     print("Бот запущен...")
 
-    # Запуск HTTP-сервера
     server_address = ('', 8080)
     httpd = HTTPServer(server_address, RequestHandler)
     print("HTTP-сервер запущен на порту 8080")

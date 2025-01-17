@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Bot Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+        }
+        .user-list {
+            width: 25%;
+            border-right: 1px solid #ccc;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .user-item {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #ddd;
+        }
+        .user-item:hover {
+            background-color: #f0f0f0;
+        }
+        .chat-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-header {
+            padding: 10px;
+            border-bottom: 1px solid #ccc;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .chat-input {
+            display: flex;
+            border-top: 1px solid #ccc;
+        }
+        .chat-input input {
+            flex-grow: 1;
+            padding: 10px;
+            border: none;
+            border-right: 1px solid #ccc;
+        }
+        .chat-input button {
+            padding: 10px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        .chat-input button:hover {
+            background-color: #0056b3;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .message.bot {
+            background-color: #d9f9d9;
+            text-align: right;
+        }
+        .message.user {
+            background-color: #f1f1f1;
+        }
+    </style>
+</head>
+<body>
+    <div class="user-list" id="userList">
+        Loading users...
+    </div>
+    <div class="chat-container">
+        <div class="chat-header" id="chatHeader">Select a user to start chatting</div>
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="chat-input">
+            <input type="text" id="messageInput" placeholder="Type a message">
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://127.0.0.1:8080';
+        const ACCESS_TOKEN = 'my_secure_token';
+        let currentUser = null;
+        let socket = null;
+
+        async function loadUsers() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/users`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': ACCESS_TOKEN,
+                    },
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Error fetching users: ${response.statusText}`);
+                }
+
+                const users = await response.json();
+                const userList = document.getElementById('userList');
+                userList.innerHTML = '';
+
+                users.forEach(user => {
+                    const userItem = document.createElement('div');
+                    userItem.className = 'user-item';
+                    userItem.textContent = `${user.first_name} ${user.last_name}`;
+                    userItem.onclick = () => openChat(user);
+                    userList.appendChild(userItem);
+                });
+            } catch (error) {
+                console.error('Failed to load users:', error);
+                alert('Failed to load users. Please check the console for more details.');
+            }
+        }
+
+        async function openChat(user) {
+            currentUser = user;
+            document.getElementById('chatHeader').textContent = `${user.first_name} ${user.last_name}`;
+            await loadMessages();
+            connectWebSocket(user.id);
+        }
+
+        async function loadMessages() {
+            if (!currentUser) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/messages?chat_id=${currentUser.id}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': ACCESS_TOKEN,
+                    },
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Error fetching messages: ${response.statusText}`);
+                }
+
+                const messages = await response.json();
+                const chatMessages = document.getElementById('chatMessages');
+                chatMessages.innerHTML = '';
+
+                messages.forEach(msg => {
+                    const messageItem = document.createElement('div');
+                    messageItem.className = `message ${msg.username === 'bot' ? 'bot' : 'user'}`;
+                    messageItem.textContent = `${msg.username}: ${msg.command}`;
+                    chatMessages.appendChild(messageItem);
+                });
+
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            } catch (error) {
+                console.error('Failed to load messages:', error);
+                alert('Failed to load messages. Please check the console for more details.');
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message || !currentUser) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/send_message`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': ACCESS_TOKEN,
+                    },
+                    body: JSON.stringify({
+                        user_id: currentUser.id,
+                        message,
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Error sending message: ${response.statusText}`);
+                }
+
+                input.value = '';
+                // Messages will automatically be updated via WebSocket
+            } catch (error) {
+                console.error('Failed to send message:', error);
+                alert('Failed to send message. Please check the console for more details.');
+            }
+        }
+
+        function connectWebSocket(userId) {
+            if (socket) {
+                socket.close();
+            }
+
+            socket = new WebSocket(`ws://127.0.0.1:8765?user_id=${userId}`);
+
+            socket.onopen = () => {
+                console.log("WebSocket connected");
+            };
+
+            socket.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                const chatMessages = document.getElementById('chatMessages');
+                const messageItem = document.createElement('div');
+                messageItem.className = `message ${message.username === 'bot' ? 'bot' : 'user'}`;
+                messageItem.textContent = `${message.username}: ${message.command}`;
+                chatMessages.appendChild(messageItem);
+
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            };
+
+            socket.onerror = (error) => {
+                console.error("WebSocket error:", error);
+            };
+
+            socket.onclose = () => {
+                console.log("WebSocket disconnected");
+            };
+        }
+
+        document.getElementById('sendButton').onclick = sendMessage;
+        document.getElementById('messageInput').onkeydown = (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        };
+
+        loadUsers();
+    </script>
+</body>
+</html>
